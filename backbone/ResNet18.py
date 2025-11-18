@@ -38,6 +38,7 @@ class BasicBlock(nn.Module):
         :param planes: the number of channels (to be possibly expanded)
         """
         super(BasicBlock, self).__init__()
+        self.return_prerelu = False
         self.conv1 = conv3x3(in_planes, planes, stride)
         self.bn1 = nn.BatchNorm2d(planes)
         self.conv2 = conv3x3(planes, planes)
@@ -60,6 +61,10 @@ class BasicBlock(nn.Module):
         out = relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out += self.shortcut(x)
+
+        if self.return_prerelu:
+            self.prerelu = out.clone()
+
         out = relu(out)
         return out
 
@@ -80,27 +85,29 @@ class ResNet(MammothBackbone):
         """
         super(ResNet, self).__init__()
         self.in_planes = nf
+        self.return_prerelu = False
         self.block = block
+        self.num_blocks = num_blocks
         self.num_classes = num_classes
         self.nf = nf
-        self.conv1 = conv3x3(3, nf * 1)
+        self.out_channels = nf * 8
+        self.feat_2x_channels = nf * 4 # used from saliency_net
+        self.feat_4x_channels = nf * 2 # used from saliency_net
+        self.conv1 = conv3x3(in_planes=3, out_planes=nf * 1)
         self.bn1 = nn.BatchNorm2d(nf * 1)
+        self.enable_maxpool = False  # needed for DualNet
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, nf * 1, num_blocks[0], stride=1)
         self.layer2 = self._make_layer(block, nf * 2, num_blocks[1], stride=2)
         self.layer3 = self._make_layer(block, nf * 4, num_blocks[2], stride=2)
         self.layer4 = self._make_layer(block, nf * 8, num_blocks[3], stride=2)
-        self.linear = nn.Linear(nf * 8 * block.expansion, num_classes)
-        '''
-        self._features = nn.Sequential(self.conv1,
-                                       self.bn1,
-                                       nn.ReLU(),
-                                       self.layer1,
-                                       self.layer2,
-                                       self.layer3,
-                                       self.layer4
-                                       )
-        '''
-        self.classifier = self.linear
+        self.classifier = nn.Linear(nf * 8 * block.expansion, num_classes)
+    
+    def set_return_prerelu(self, enable=True):
+        self.return_prerelu = enable
+        for c in self.modules():
+            if isinstance(c, self.block):
+                c.return_prerelu = enable
 
     def _make_layer(self, block: BasicBlock, planes: int,
                     num_blocks: int, stride: int) -> nn.Module:
@@ -126,16 +133,33 @@ class ResNet(MammothBackbone):
         :param returnt: return type (a string among 'out', 'features', 'all')
         :return: output tensor (output_classes)
         """
+        #                                    seq-cifar10      seq-img100        
+        #                            x.shape:  3, 32, 32      3, 288, 384 
+        out_0 = self.bn1(self.conv1(x))
+        if self.return_prerelu:
+            out_0_t = out_0.clone()
+        if not isinstance(self.conv1, nn.Identity):
+            out_0 = relu(out_0)             # 64, 32, 32      64, 288, 384       
+        #if hasattr(self, 'maxpool'):
+        if self.enable_maxpool:
+            out_0 = self.maxpool(out_0)
+        out_1 = self.layer1(out_0)          # 64, 32, 32      64, 288, 384
+        out_2 = self.layer2(out_1)#feat_4x  #128, 16, 16     128, 144, 192
+        out_3 = self.layer3(out_2)#feat_2x  #256,  8,  8     256,  72,  96
+        out_4 = self.layer4(out_3)#feat_1x  #512,  4,  4     512,  36,  48
+        
+        if returnt == 'saliency': #for saliency net
+            #return out_4, out_3, out_2
+            return [
+                out_0 if not self.return_prerelu else out_0_t,
+                out_1 if not self.return_prerelu else self.layer1[-1].prerelu,
+                out_2 if not self.return_prerelu else self.layer2[-1].prerelu,
+                out_3 if not self.return_prerelu else self.layer3[-1].prerelu,
+                out_4 if not self.return_prerelu else self.layer4[-1].prerelu
+            ]
 
-        out = relu(self.bn1(self.conv1(x))) # 64, 32, 32
-        if hasattr(self, 'maxpool'):
-            out = self.maxpool(out)
-        out = self.layer1(out)  # -> 64, 32, 32
-        out = self.layer2(out)  # -> 128, 16, 16
-        out = self.layer3(out)  # -> 256, 8, 8
-        out = self.layer4(out)  # -> 512, 4, 4
-        out = avg_pool2d(out, out.shape[2]) # -> 512, 1, 1
-        feature = out.view(out.size(0), -1)  # 512
+        feature = avg_pool2d(out_4, out_4.shape[2]) # 512, 1, 1
+        feature = feature.view(feature.size(0), -1) # 512      
 
         if returnt == 'features':
             return feature
@@ -146,9 +170,16 @@ class ResNet(MammothBackbone):
             return out
         elif returnt == 'all':
             return (out, feature)
-
-        raise NotImplementedError("Unknown return type")
-
+        elif returnt == 'full':
+            return out, [
+                out_0 if not self.return_prerelu else out_0_t,
+                out_1 if not self.return_prerelu else self.layer1[-1].prerelu,
+                out_2 if not self.return_prerelu else self.layer2[-1].prerelu,
+                out_3 if not self.return_prerelu else self.layer3[-1].prerelu,
+                out_4 if not self.return_prerelu else self.layer4[-1].prerelu
+            ]
+        raise NotImplementedError(f"Unknown return type: {returnt}")
+    
 
 def resnet18(nclasses: int, nf: int=64) -> ResNet:
     """

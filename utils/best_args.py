@@ -75,7 +75,7 @@ best_args = {
                                         'freezing_buff_size': 200,
                                         'batch_size': 32,
                                         'minibatch_size': 32,
-                                        'n_epochs':10},
+                                        'n_epochs':2},
                                     500: {'lr': 0.03,
                                         'optim_mom': 0,
                                         'optim_wd': 0,
@@ -83,7 +83,7 @@ best_args = {
                                         'freezing_buff_size': 200,
                                         'batch_size': 32,
                                         'minibatch_size': 32,
-                                        'n_epochs':10}
+                                        'n_epochs':2}
                               }
                             },
     'seq-tinyimg': {'sgd': {-1: {'lr': 0.03,
