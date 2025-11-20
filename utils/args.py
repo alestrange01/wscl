@@ -72,6 +72,13 @@ def add_management_args(parser: ArgumentParser) -> None:
                         help='subset dataset to use.')
     
 
+    parser.add_argument('--savecheck', action='store_true',
+                        help='Whether to save checkpoint')
+    parser.add_argument('--sal_ckpt', type=str, default=None)
+    parser.add_argument('--class_ckpt', type=str, default=None)
+    parser.add_argument('--run_idx', type=int, default=0, help='fake run index for wandb')
+    
+
 
 def add_rehearsal_args(parser: ArgumentParser) -> None:
     """
@@ -82,3 +89,25 @@ def add_rehearsal_args(parser: ArgumentParser) -> None:
                         help='The size of the memory buffer.')
     parser.add_argument('--minibatch_size', type=int,
                         help='The batch size of the memory buffer.')
+
+def add_saliency_args(parser: ArgumentParser) -> None:
+        #Saliency net paramaters;
+        parser.add_argument('--sal_lr', type=float, default=0.04)
+        parser.add_argument('--sal_cnn_lr_factor', type=float, default=0.1)
+        parser.add_argument('--sal_cnn_weight_decay', type=float, default=1e-5)
+        parser.add_argument('--sal_momentum', type=float, default=0.9)
+        parser.add_argument('--sal_weight_decay', type=float, default=1e-4)
+        parser.add_argument('--sal_opt', type=str, default='SGD', choices=['SGD', 'Adam', 'RMSprop'])
+        parser.add_argument('--sal_scheduler', type=str, default='None', choices = ['None','ExponentialLR'])
+        parser.add_argument('--sal_lr_gamma', type=float, default=0.999)
+        parser.add_argument('--sal_n_gaussians', type=int, default=0)
+        parser.add_argument('--sal_kld_weight', type=float, default=1.0,
+                            help='KL_div loss penalty')
+        parser.add_argument('--sal_cc_weight', type=float, default=-0.1,
+                            help='CC loss penalty')
+        parser.add_argument('--sal_coeff', type=float, default=1.,
+                            help= 'saliency loss coefficient')
+        parser.add_argument('--backbone_pretrained', action='store_true')
+        parser.add_argument('--mnp', choices=['aggregate', 'multiply', 'dwseparable'], required=True)
+        parser.add_argument('--mnp_blocks', type=int, nargs=5, default=[1,1,1,1,1])
+        parser.add_argument('--saliency_frozen', action='store_true')

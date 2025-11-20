@@ -32,6 +32,7 @@ from utils.conf import set_random_seed
 from utils.continual_training import train as ctrain
 from utils.distributed import make_dp
 from utils.training import train
+import time
 
 
 def lecun_fix():
@@ -123,6 +124,11 @@ def main(args=None):
 
     if args.debug_mode:
         args.nowand = 1
+
+    if args.savecheck:
+        now = time.strftime('%Y-%m-%d_%Hh%M')
+        args.ckpt_name = f"{args.model}_{args.dataset}_{args.buffer_size if hasattr(args, 'buffer_size') else 0}_{args.n_epochs}_{str(now)}"
+        args.ckpt_name_replace = f"{args.model}_{args.dataset}_{'{}'}_{args.buffer_size if hasattr(args, 'buffer_size') else 0}_{args.n_epochs}_{str(now)}"
 
     # set job name
     setproctitle.setproctitle('{}_{}_{}'.format(args.model, args.buffer_size if 'buffer_size' in args else 0, args.dataset))

@@ -170,6 +170,7 @@ def store_previous_masked_loaders(train_dataset: Dataset, test_dataset: Dataset,
         labels_to_remove = list(setting.label_to_pos.values())[:setting.i]
         #train_mask: samples of the current task + future classes
         mask_list = [np.array(train_dataset.targets) != label for label in labels_to_remove]
+        #Per ogni classe: True se il sample NON è di quella classe, False se il sample è di quella classe.
 
         if validation_dataset is not None:
             current_labels = list(setting.label_to_pos.values())[setting.i:setting.i+setting.N_CLASSES_PER_TASK]
@@ -200,7 +201,7 @@ def store_previous_masked_loaders(train_dataset: Dataset, test_dataset: Dataset,
 
         mask_list = [np.array(train_dataset.targets) != label for label in labels]
         for mask in mask_list:
-            indices = np.where(mask == False)[0]                                        #indici delle immagini che NON sono della classe 1 (esempio)
+            indices = np.where(mask == False)[0]                                        #indici delle immagini sono della classe 1 (esempio)
             mask_filter = indices[setting.val_size//setting.N_CLASSES_PER_TASK]
             mask[mask_filter:] = True                                                       
 
