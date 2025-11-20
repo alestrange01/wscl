@@ -1,7 +1,7 @@
 import numpy as np
 import yaml
 
-yaml_file = "../imagenet100_aux.yml"
+yaml_file = "/home/astrano/projects/Dottorato/SER/data/seq_miniimg.yml"
 npy_file = "imagenet_100_subset_classes_list.npy"
 
 # 1. Load YAML

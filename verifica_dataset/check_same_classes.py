@@ -2,7 +2,7 @@ import os
 import yaml
 
 # paths
-yaml_file = "../imagenet100_primary.yml"
+yaml_file = "../seq_miniimg.yml"
 train_dir = "/mnt/storage_6TB/share/data/ImageNetFG/images/train"
 
 # load YAML
