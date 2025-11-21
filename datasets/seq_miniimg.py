@@ -26,7 +26,7 @@ class MiniImagenet(Dataset):
     INPUT_SIZE = (288, 384)
 
     def __init__(self, root: str, train: bool = True, transform: Optional[nn.Module] = None,
-                target_transform: Optional[nn.Module] = None, subset:float = 1., primary:bool = True, in_memory=False) -> None:
+                target_transform: Optional[nn.Module] = None, subset:float = 1., in_memory=False) -> None:
         self.not_aug_transform = transforms.Compose([
             transforms.Resize(MiniImagenet.INPUT_SIZE, interpolation=transforms.InterpolationMode.LANCZOS),
             transforms.ToTensor()])
@@ -36,7 +36,7 @@ class MiniImagenet(Dataset):
         self.target_transform = target_transform
         assert 0 < subset <= 1.
         self.subset = subset
-
+        self.in_memory = in_memory
 
         with open('data/seq_miniimg.yml','r') as readfile:
             self.all_classes = yaml.load(readfile, Loader=yaml.FullLoader)  
@@ -198,8 +198,9 @@ class MiniImagenetSal(MiniImagenet):
 
     #TARGET_SIZE = (480, 640)
     TARGET_SIZE = (288, 384)
-    def __init__(self, root: str, train: bool = True, transform: Optional[nn.Module] = None, target_transform: Optional[nn.Module] = None, subset:float = 1.) -> None:
-        super().__init__(root, train, transform, target_transform, subset)
+    def __init__(self, root: str, train: bool = True, transform: Optional[nn.Module] = None, 
+                 target_transform: Optional[nn.Module] = None, subset:float = 1., in_memory=False) -> None:
+        super().__init__(root, train, transform, target_transform, subset, in_memory)
         self.map_transform = transforms.Compose([
             transforms.Resize(MiniImagenetSal.TARGET_SIZE, interpolation=transforms.InterpolationMode.LANCZOS),
             transforms.ToTensor(),
@@ -219,15 +220,21 @@ class MiniImagenetSal(MiniImagenet):
     
 
     def __getitem__(self, index): # we have to add saliency map
-        img, target = self.data[index], self.targets[index]
-        if isinstance(img, str):
-            #img_path is only the path where img is located; 
-            img = cv2.imread(img)
+        target = self.targets[index]
+        img_path = self.data_path[index]
+        img_item = self.data[index]
+
+        if isinstance(img_item, str):
+            # in_memory = False → self.data contiene path
+            img = cv2.imread(img_item)
             img = np.ascontiguousarray(img[:, :, ::-1])
             img = transforms.ToPILImage()(img)
-            original_img = img.copy()
         else:
-            raise NotImplementedError('In Saliency-aided Datasets img should be a string.')
+            # in_memory = True → self.data contiene già le immagini (NumPy array)
+            # img_item è tipo H×W×C (RGB)
+            img = transforms.ToPILImage()(img_item)
+        
+        original_img = img.copy()
 
         if self.transform is not None:
             img = self.transform(img)
@@ -235,34 +242,42 @@ class MiniImagenetSal(MiniImagenet):
         if self.target_transform is not None:
             target = self.target_transform(target)
         
-        # #get sal_map
+        # get sal_map
         if hasattr(self, 'maps'):
             map = self.maps[index]
         else:
-            map_path = self.data[index].replace('images', 'annotations').replace('JPEG', 'png')
+            map_path = img_path.replace('images', 'annotations').replace('JPEG', 'png')
             map = cv2.imread(map_path, cv2.IMREAD_GRAYSCALE)
-            map = transforms.ToPILImage()(map)    
+            map = transforms.ToPILImage()(map)
+            
 
         if self.map_transform is not None:
             map = self.map_transform(map)
-
+        
         if hasattr(self, 'logits'):  
             return (img, map), target, original_img, self.logits[index]
-        
+
         return (img, map), target
+
+
 
 
 class MyMiniImagenetSal(MiniImagenetSal):
     def __getitem__(self, index):
-        img, target = self.data[index], self.targets[index]
-        if isinstance(img, str):
+
+        target = self.targets[index]
+        img_path = self.data_path[index]
+        img_item = self.data[index]
+
+        if self.in_memory:
+            img = transforms.ToPILImage()(img_item)
+        else:
             #img_path is only the path where img is located; it's something like : /mnt/SSD/datasets/MiniImagenet/images/train/n01440764/n01440764_519.JPEG
-            img = cv2.imread(img)
+            img = cv2.imread(img_path)
             img = np.ascontiguousarray(img[:, :, ::-1])
             img = transforms.ToPILImage()(img)
-            original_img = img.copy()
-        else:
-            raise NotImplementedError('In Saliency-aided Datasets img should be a string.')
+        
+        original_img = img.copy()
 
         not_aug_img = self.not_aug_transform(original_img)
 
@@ -276,7 +291,7 @@ class MyMiniImagenetSal(MiniImagenetSal):
         if hasattr(self, 'maps'):
             map = self.maps[index]
         else:
-            map_path = self.data[index].replace('images', 'annotations').replace('JPEG', 'png')
+            map_path = img_path.replace('images', 'annotations').replace('JPEG', 'png')
             map = cv2.imread(map_path, cv2.IMREAD_GRAYSCALE)
             map = transforms.ToPILImage()(map)
             
@@ -302,19 +317,19 @@ class SequentialMiniImagenetSal(ContinualDataset):
                              (0.229, 0.224, 0.225))])
 
     
-    def get_data_loaders(self):
+    def get_data_loaders(self, in_memory:bool=False):
         transform = self.TRANSFORM
 
         test_transform = self.TRANSFORM
         
         train_dataset = MyMiniImagenetSal(self.args.dataset_path + 'seqMINIIMG',
-                                      train = True, transform=transform, subset=self.args.dataset_subset)
+                                      train = True, transform=transform, subset=self.args.dataset_subset, in_memory=in_memory)
                             
         if self.args.validation:
             raise NotImplementedError()
         else:
             test_dataset = MiniImagenetSal(self.args.dataset_path + 'seqMINIIMG',
-                                      train = False, transform=test_transform)
+                                      train = False, transform=test_transform, in_memory=in_memory)
 
         train, test = store_masked_loaders(train_dataset, test_dataset, self)
         return train, test

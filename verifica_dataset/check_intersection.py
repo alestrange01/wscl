@@ -1,7 +1,8 @@
 import numpy as np
 import yaml
 
-yaml_file = "/home/astrano/projects/Dottorato/SER/data/seq_miniimg.yml"
+# yaml_file = "../seq_miniimg.yml"
+yaml_file = "../imagenet100_primary.yml"
 npy_file = "imagenet_100_subset_classes_list.npy"
 
 # 1. Load YAML
@@ -24,30 +25,34 @@ extras_in_subset = subset_classes - yaml_classes
 print("=== RESULTS ===")
 print(f"YAML classes:      {len(yaml_classes)}")
 print(f"NPY subset classes:{len(subset_classes)}")
-print(f"Intersection:      {len(intersection)}\n")
+print(f"Intersection:      {len(intersection)}")
 
-if intersection:
-    print("Common classes:")
-    for c in sorted(intersection):
-        print("  -", c)
-else:
-    print("No common classes.")
+#check if all classes are different
+all_classes_different = (len(intersection) == 0)
+print(f"All classes different: {all_classes_different}")
 
-if missing_from_subset:
-    print("Classes in YAML but not in the .npy subset:")
-    for c in sorted(missing_from_subset):
-        print("  -", c)
-else:
-    print("No YAML classes missing from .npy.")
+# if intersection:
+#     print("Common classes:")
+#     for c in sorted(intersection):
+#         print("  -", c)
+# else:
+#     print("No common classes.")
 
-print()
+# if missing_from_subset:
+#     print("Classes in YAML but not in the .npy subset:")
+#     for c in sorted(missing_from_subset):
+#         print("  -", c)
+# else:
+#     print("No YAML classes missing from .npy.")
 
-if extras_in_subset:
-    print("Classes in .npy subset but not in YAML:")
-    for c in sorted(extras_in_subset):
-        print("  -", c)
-else:
-    print("No extra classes in .npy beyond YAML.")
+# print()
+
+# if extras_in_subset:
+#     print("Classes in .npy subset but not in YAML:")
+#     for c in sorted(extras_in_subset):
+#         print("  -", c)
+# else:
+#     print("No extra classes in .npy beyond YAML.")
 
 
 """ 

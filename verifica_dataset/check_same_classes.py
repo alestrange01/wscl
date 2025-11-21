@@ -2,8 +2,9 @@ import os
 import yaml
 
 # paths
-yaml_file = "../seq_miniimg.yml"
-train_dir = "/mnt/storage_6TB/share/data/ImageNetFG/images/train"
+# yaml_file = "../seq_miniimg.yml"
+yaml_file = "../imagenet100_primary.yml"
+train_dir = "/mnt/storage_6TB/share/data/ImageNetFG/annotations/train"
 
 # load YAML
 with open(yaml_file, "r") as f:
@@ -20,30 +21,32 @@ train_classes = set(
 # compute differences
 missing_dirs = yaml_classes - train_classes
 extra_dirs = train_classes - yaml_classes
+intersection = yaml_classes & train_classes
 
 print("=== CHECK RESULTS ===")
 print(f"Total YAML classes : {len(yaml_classes)}")
 print(f"Total train dirs   : {len(train_classes)}\n")
+print(f"Intersection count : {len(intersection)}\n")
 
-if missing_dirs:
-    print(f"Missing directories (present in YAML but not in train/): {len(missing_dirs)}")
-    for d in sorted(missing_dirs):
-        print("  -", d)
-else:
-    print("No missing directories.")
+# if missing_dirs:
+#     print(f"Missing directories (present in YAML but not in train/): {len(missing_dirs)}")
+#     for d in sorted(missing_dirs):
+#         print("  -", d)
+# else:
+#     print("No missing directories.")
 
-print()
+# print()
 
-if extra_dirs:
-    print(f"Extra directories (present in train/ but not YAML): {len(extra_dirs)}")
-    for d in sorted(extra_dirs):
-        print("  -", d)
-else:
-    print("No extra directories.")
+# if extra_dirs:
+#     print(f"Extra directories (present in train/ but not YAML): {len(extra_dirs)}")
+#     for d in sorted(extra_dirs):
+#         print("  -", d)
+# else:
+#     print("No extra directories.")
 
 
 """
-=== CHECK RESULTS ===
+=== CHECK RESULTS === imagenet100_primary.yml AND ImageNetFG/images/train/ ===
 Total YAML classes : 100
 Total train dirs   : 100
 
