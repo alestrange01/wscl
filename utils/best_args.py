@@ -206,6 +206,40 @@ best_args = {
                                     200: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 10},
                                     1000: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 10}
                               }},
+      'dream-seq-img100sal': {
+                    'er': {200: {'lr': 0.1,
+                                 'minibatch_size': 32,
+                                 'batch_size': 32,
+                                 'n_epochs': 10},
+                           1000: {'lr': 0.03,
+                                 'minibatch_size': 32,
+                                 'batch_size': 32,
+                                 'n_epochs': 10},},
+                    'derpp': {200: {'lr': 0.03,
+                                    'minibatch_size': 8,
+                                    'alpha': 0.1,
+                                    'beta': 1.0,
+                                    'batch_size': 8,
+                                    'n_epochs':10,
+                                    'val_dataset_size': 1000, 
+                                    'freezing_buff_size': 200},
+                              1000: {'lr': 0.03,
+                                    'minibatch_size': 8,
+                                    'alpha': 0.2,
+                                    'beta': 0.5,
+                                    'batch_size': 8,
+                                    'n_epochs':10,
+                                    'val_dataset_size': 1000, 
+                                    'freezing_buff_size': 200}
+                                    },
+                    'er_ace': {
+                                    200: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 1},
+                                    1000: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 1}
+                              },
+                    'er_ace_ser': {
+                                    200: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 1},
+                                    1000: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 1}
+                              }},
     'seq-cifar100': {
         'sgd': {-1: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0}},
         'er': {

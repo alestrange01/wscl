@@ -1,4 +1,4 @@
-from torchvision.utils import save_image
+""" from torchvision.utils import save_image
 import matplotlib.pyplot as plt
 from seq_imagenet100 import Imagenet100Sal
 
@@ -26,3 +26,4 @@ plt.title("Saliency Map")
 plt.axis("off")
 
 plt.savefig("example_image_saliency.png")
+ """

@@ -8,6 +8,7 @@ from datasets import get_dataset
 
 from models.utils.cl2branches import CLModel2Branches
 from utils.args import add_management_args, add_experiment_args, add_rehearsal_args, add_saliency_args, ArgumentParser
+from utils.buffer import Buffer
 
 
 def get_parser() -> ArgumentParser:
@@ -27,13 +28,16 @@ class ErACESER(CLModel2Branches):
 
     def __init__(self, backbone, loss, args, transform):
         super(ErACESER, self).__init__(backbone, loss, args, transform)
-        
+        self.buffer = Buffer(self.args.buffer_size, self.device)
         self.seen_so_far = torch.tensor([]).long().to(self.device)
         self.num_classes = get_dataset(args).N_TASKS * get_dataset(args).N_CLASSES_PER_TASK
+        self.task = 0
+
+    def end_task(self, dataset):
+        self.task += 1
 
 
-
-    def observe(self, inputs, labels, not_aug_inputs):
+    def observe(self, inputs, labels, not_aug_inputs, current_task_labels, task_number=-1, args=None, tb_logger=None, epoch=-1):
         
         if self.args.saliency_frozen:
             assert not self.saliency_net.training
@@ -87,7 +91,17 @@ class ErACESER(CLModel2Branches):
         loss.backward()
         self.opt.step()
 
-        self.buffer.add_data(examples=imgs,
+        # --- buffer update logic (WSCL-style) ---
+        # filters the items in the batch based on the current task
+        if current_task_labels != []:
+            # build a mask that is True for samples whose label is in current_task_labels
+            mask_list = torch.stack([labels == l for l in current_task_labels])
+            mask = torch.any(mask_list, dim=0)
+
+            not_aug_inputs = not_aug_inputs[mask]
+            labels = labels[mask]
+
+        self.buffer.add_data(examples=not_aug_inputs,
                              labels=labels)
 
         return [loss.item(), sal_loss.item()]
