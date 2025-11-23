@@ -37,43 +37,95 @@ class ErACESER(CLModel2Branches):
         self.task += 1
 
 
-    def observe(self, inputs, labels, not_aug_inputs, current_task_labels, task_number=-1, args=None, tb_logger=None, epoch=-1):
-        
-        if self.args.saliency_frozen:
-            assert not self.saliency_net.training
-        present = labels.unique()
-        self.seen_so_far = torch.cat([self.seen_so_far, present]).unique()
-
-        assert isinstance(inputs, list)
-        if not self.args.saliency_frozen:
+    def observe(self, inputs, labels, not_aug_inputs, current_task_labels):
+    
+        self.opt.zero_grad()
+        if self.saliency_net is not None and not self.args.saliency_frozen:
             self.saliency_opt.zero_grad()
 
-        imgs, sal_map = inputs
-        #Saliency Prediction task
-        sal_pred, sal_features = self.saliency_net(imgs)
-        sal_features = [sal_f.detach() for sal_f in sal_features]
+        if self.args.saliency_frozen:
+            assert not self.saliency_net.training
 
-        sal_loss = self.sal_criterion(sal_pred, sal_map) * self.sal_coeff
-        if not self.args.saliency_frozen:
-            sal_loss.backward()
-            self.saliency_opt.step()
+        # er-ace logic
+        present = labels.unique()
+        self.seen_so_far = torch.cat([self.seen_so_far, present]).unique()
+    
+    
+        assert isinstance(inputs, list)
+        imgs, sal_maps = inputs  # imgs: (B, C, H, W) (8, 3, 288, 234), sal_maps: (B, 1, H, W)(8, 1, 288, 234)
+        B = labels.size(0) # labels: tensor di shape (B,)
 
-        logits = self.forward_mnp(imgs, sal_features)
-        mask = torch.zeros_like(logits)
+        # current_task_labels: lista o tensor di etichette REAL del task corrente
+        current_task_labels_tensor = torch.as_tensor(current_task_labels, device=labels.device)
+
+        # is_real[b] = True se labels[b] è una label del task REAL corrente
+        is_real = (labels.unsqueeze(1) == current_task_labels_tensor.unsqueeze(0)).any(dim=1)
+
+        real_idx = is_real.nonzero(as_tuple=True)[0]        # indici REAL
+        dream_idx = (~is_real).nonzero(as_tuple=True)[0]    # indici DREAM
+
+        logits_all = torch.zeros((B, self.num_classes), device=labels.device)  
+        sal_loss = torch.tensor(0., device=labels.device)  
+        total_loss = torch.tensor(0., device=labels.device)
+
+        # --------------------------------------------------
+        # 1) REAL: saliency_net + MNP (SER)
+        # --------------------------------------------------
+        # Sottobatch REAL (hanno sal_map ground-truth reale)
+        if real_idx.numel() > 0:
+            imgs_real      = imgs[real_idx]
+            sal_maps_real  = sal_maps[real_idx]
+            # labels_real    = labels[real_idx]
+
+            if not self.args.saliency_frozen:
+                sal_pred, sal_features = self.saliency_net(imgs_real)
+            else:
+                with torch.no_grad():
+                    sal_pred, sal_features = self.saliency_net(imgs_real)
+
+            sal_features = [sal_f.detach() for sal_f in sal_features]
+            logits_real = self.forward_mnp(imgs_real, sal_features)
+            
+            logits_all[real_idx] = logits_real
+
+            sal_loss = self.sal_criterion(sal_pred, sal_maps_real) * self.sal_coeff 
+            if not self.args.saliency_frozen:
+                sal_loss.backward()
+                self.saliency_opt.step()
+
+        # --------------------------------------------------
+        # 2) DREAM: backbone senza salienza nè MNP
+        # --------------------------------------------------
+        # Sottobatch DREAM (sal_map è dummy, da ignorare) -> forward classico
+        if dream_idx.numel() > 0:
+            imgs_dream   = imgs[dream_idx]
+            # labels_dream = labels[dream_idx]
+
+            # forward "pulito": ResNet senza adapter, senza saliency_net
+            logits_dream = self.forward_no_saliency(imgs_dream, returnt='out')
+            logits_all[dream_idx] = logits_dream
+
+        # --------------------------------------------------
+        # 3) ER-ACE: masking dei logits del batch corrente
+        # --------------------------------------------------
+        mask = torch.zeros_like(logits_all)
         mask[:, present] = 1
 
-        self.opt.zero_grad()
         if self.seen_so_far.max() < (self.num_classes - 1):
             mask[:, self.seen_so_far.max():] = 1
 
         if self.task > 0:
-            logits = logits.masked_fill(mask == 0, torch.finfo(logits.dtype).min)
+            logits_all = logits_all.masked_fill(mask == 0, torch.finfo(logits_all.dtype).min)
 
-        loss = self.loss(logits, labels)
-        loss_re = torch.tensor(0.)
+        cls_loss = self.loss(logits_all, labels)
+
+        # --------------------------------------------------
+        # 4) Replay da buffer (ER)
+        # --------------------------------------------------
+        loss_re = torch.tensor(0., device=labels.device)
 
         if self.task > 0:
-            # sample from buffer
+            # sample from buffer: it contains only past real task data with saliency maps
             saliency_status = self.saliency_net.training
             self.saliency_net.eval()
             buf_inputs, buf_labels = self.buffer.get_data(self.args.minibatch_size, transform=None)
@@ -86,12 +138,16 @@ class ErACESER(CLModel2Branches):
             loss_re = self.loss(buf_outputs, buf_labels)
             self.saliency_net.train(saliency_status)
 
-        loss += loss_re
-
-        loss.backward()
+        # --------------------------------------------------
+        # 5) Backward
+        # --------------------------------------------------
+        total_loss += cls_loss + loss_re
+        total_loss.backward()
         self.opt.step()
 
-        # --- buffer update logic (WSCL-style) ---
+        # --------------------------------------------------
+        # 6) Aggiornamento buffer (WSCL-style)
+        # --------------------------------------------------
         # filters the items in the batch based on the current task
         if current_task_labels != []:
             # build a mask that is True for samples whose label is in current_task_labels
@@ -100,8 +156,9 @@ class ErACESER(CLModel2Branches):
 
             not_aug_inputs = not_aug_inputs[mask]
             labels = labels[mask]
-
+        
+        # we add to the buffer only the REAL samples of the current batch
         self.buffer.add_data(examples=not_aug_inputs,
                              labels=labels)
 
-        return [loss.item(), sal_loss.item()]
+        return [total_loss.item(), sal_loss.item() if real_idx.numel() > 0 else 0.0]

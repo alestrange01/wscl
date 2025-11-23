@@ -241,3 +241,10 @@ class CLModel2Branches(ContinualModel):
             return out
 
         raise NotImplementedError(f"Unknown return type: {returnt}")
+    
+
+    def forward_no_saliency(self, imgs: torch.Tensor, returnt: str = 'out'):
+        """
+        Forward della backbone standard senza usare saliency_net né MNP/adapters.
+        """
+        return self.net(imgs, returnt)
