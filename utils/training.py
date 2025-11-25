@@ -15,7 +15,7 @@ from models.utils.continual_model import ContinualModel
 
 from utils.loggers import *
 from utils.status import ProgressBar
-
+from utils.saliency_metrics import compute_saliency_metrics
 
 from utils.layers_freezing import freeze_layers
 import re
@@ -64,24 +64,53 @@ def evaluate(model: ContinualModel, dataset: ContinualDataset, last=False) -> Tu
     """
     status = model.net.training
     model.net.eval()
+    #cl_saliency_model
+    has_saliency = hasattr(model, 'saliency_net')
+    if has_saliency:
+        sal_status = model.saliency_net.training
+        model.saliency_net.eval()
+
     accs, accs_mask_classes = [], []
+    sal_scores = [] if has_saliency else None
     for k, test_loader in enumerate(dataset.test_loaders):
         if last and k < len(dataset.test_loaders) - 1:
             continue
         correct, correct_mask_classes, total = 0.0, 0.0, 0.0
         assert set(test_loader.dataset.targets) == set(dataset.get_task_labels(k)), "Something wrong in test dataset creation."
+        current_task_labels = []
+        if 'dream-' in dataset.NAME:
+            current_task_labels = dataset.get_current_labels()
+        print(f"Evaluating task {k} with labels {current_task_labels}")
+        print(f"Test samples: {len(test_loader.dataset)}")
         for data in test_loader:
             with torch.no_grad():
                 inputs, labels, _ = data
-                inputs, labels= inputs.to(model.device), labels.to(model.device)
-                if 'class-il' not in model.COMPATIBILITY:
-                    outputs = model(inputs, k)
+                if isinstance(inputs, list):
+                    inputs = [inp.to(model.device) for inp in inputs]
                 else:
-                    outputs = model(inputs)
+                    inputs = inputs.to(model.device)
+                labels = labels.to(model.device)
+
+                if has_saliency:
+                    if 'class-il' not in model.COMPATIBILITY:
+                        sal_preds, outputs = model(inputs, k)
+                    else:
+                        sal_preds, outputs = model(inputs)
+                else:    
+                    if 'class-il' not in model.COMPATIBILITY:
+                        outputs = model(inputs, k)
+                    else:
+                        outputs = model(inputs)
 
                 _, pred = torch.max(outputs.data, 1)
                 correct += torch.sum(pred == labels).item()
                 total += labels.shape[0]
+
+                if has_saliency:
+                    assert isinstance(inputs, list)
+                    #compute saliency metrics
+                    sal_metrics = compute_saliency_metrics(sal_preds, inputs[1], metrics = ('kld', 'cc', 'sim'))
+                    sal_scores.append(sal_metrics)
 
                 if dataset.SETTING == 'class-il':
                     mask_classes(outputs, dataset, k)
@@ -90,9 +119,20 @@ def evaluate(model: ContinualModel, dataset: ContinualDataset, last=False) -> Tu
 
         accs.append(correct / total * 100
                     if 'class-il' in model.COMPATIBILITY else 0)
-        accs_mask_classes.append(correct_mask_classes / total * 100)
+        accs_mask_classes.append(correct_mask_classes / total * 100 if total > 0 else 0)
+        
+        if has_saliency:
+            final_sal_scores = []
+            for m_index in range(len(sal_scores[0])):
+                values = [s[m_index] for s in sal_scores]
+                values = torch.cat(values)
+                final_sal_scores.append(torch.mean(values).item())
 
     model.net.train(status)
+    if has_saliency:
+        model.saliency_net.train(sal_status)
+        return accs, accs_mask_classes, final_sal_scores
+
     return accs, accs_mask_classes
 
 def train(model: ContinualModel, dataset: ContinualDataset,
@@ -112,6 +152,8 @@ def train(model: ContinualModel, dataset: ContinualDataset,
         args.wandb_url = wandb.run.get_url()
 
     model.net.to(model.device)
+    if hasattr(model, 'saliency_net'):
+        model.saliency_net.to(model.device)
     results, results_mask_classes = [], []
 
     if not args.disable_log:
@@ -167,6 +209,7 @@ def train(model: ContinualModel, dataset: ContinualDataset,
 
         if hasattr(model, 'begin_task'):
             model.begin_task(dataset)
+
         if t and not args.ignore_other_metrics:
             accs = evaluate(model, dataset, last=True)
             results[t-1] = results[t-1] + accs[0]
@@ -175,12 +218,25 @@ def train(model: ContinualModel, dataset: ContinualDataset,
 
         scheduler = dataset.get_scheduler(model, args)
         print(f"Task n: {t} involves {len(train_loader.dataset)} samples.")
+        def count_real_dream(train_loader, current_task_labels):
+            current_task_labels_tensor = torch.as_tensor(current_task_labels)
+            real, dream = 0, 0
+            for _, labels, *_ in train_loader:
+                labels = labels.cpu()
+                is_real = (labels.unsqueeze(1) == current_task_labels_tensor.unsqueeze(0)).any(dim=1)
+                real  += is_real.sum().item()
+                dream += (~is_real).sum().item()
+
+            return real, dream
+        # num_real, num_dream = count_real_dream(train_loader, current_task_labels)
+        # print(f"Task n: {t} involves {len(train_loader.dataset)} samples: Real: {num_real}, Dream: {num_dream}")
+        # T0: Real: 1500, Dream: 47500
 
         for epoch in range(model.args.n_epochs):
             if args.model == 'joint':
                 continue
             #Freezing mechanims
-            if args.freezing_eval is not None and t > 0 and epoch == 0:
+            if args.freezing_eval is not None and t > 0 and epoch == 0: 
 
                 models, modules_names_to_freeze = [deepcopy(model)], []
                 last_frozen_module = None
@@ -210,29 +266,42 @@ def train(model: ContinualModel, dataset: ContinualDataset,
 
             
             for i, data in enumerate(train_loader):
-                if args.debug_mode and i > 3:
+                if args.debug_mode and i > 10:
                     break
                 if hasattr(dataset.train_loader.dataset, 'logits'):
                     inputs, labels, not_aug_inputs, logits = data
-                    inputs = inputs.to(model.device)
+                    if isinstance(inputs, list):
+                        inputs = [inp.to(model.device) for inp in inputs]
+                    else:
+                        inputs = inputs.to(model.device)
                     labels = labels.to(model.device)
                     not_aug_inputs = not_aug_inputs.to(model.device)
                     logits = logits.to(model.device)
                     loss = model.meta_observe(inputs, labels, not_aug_inputs, logits)
                 else:
                     inputs, labels, not_aug_inputs = data
-                    inputs, labels = inputs.to(model.device), labels.to(model.device)
+                    if isinstance(inputs, list):
+                        inputs = [inp.to(model.device) for inp in inputs]
+                    else:
+                        inputs = inputs.to(model.device)
+                    labels = labels.to(model.device)
 
                     not_aug_inputs = not_aug_inputs.to(model.device)
 
                     if args.freezing_eval is not None and t > 0 and epoch == 0:
                         for model_copy in models:
                             loss = model_copy.meta_observe(inputs, labels, not_aug_inputs, current_task_labels)
-                            assert not math.isnan(loss)
+                            if isinstance(loss, list):  
+                                assert not math.isnan(loss[0])
+                            else: 
+                                assert not math.isnan(loss)
                     else:
                         loss = model.meta_observe(inputs, labels, not_aug_inputs, current_task_labels)
 
-                assert not math.isnan(loss)
+                if isinstance(loss, list):  
+                    assert not math.isnan(loss[0])
+                else: 
+                    assert not math.isnan(loss)
                 progress_bar.prog(i, len(train_loader), epoch, t, loss)
             
             # Freezing evaluation
@@ -251,7 +320,12 @@ def train(model: ContinualModel, dataset: ContinualDataset,
 
                     for i, data in enumerate(buffers_list[t-1]):
                         inputs, labels, _ = data
-                        inputs, labels = inputs.to(model.device), labels.to(model.device)
+                        if isinstance(inputs, list):
+                            inputs = [inp.to(model.device) for inp in inputs]
+                        else:
+                            inputs = inputs.to(model.device)
+                        labels = labels.to(model.device)
+
                         for i, model_copy in enumerate(models):
                             correct_batch, total_batch, loss = model_eval(model_copy, inputs, labels, dataset.get_loss())
                             correct_buff[i] += correct_batch
@@ -269,7 +343,11 @@ def train(model: ContinualModel, dataset: ContinualDataset,
                 for i, data in enumerate(val_loader):
                     if args.freezing_eval != "buffer":
                         inputs, labels, _ = data
-                        inputs, labels = inputs.to(model.device), labels.to(model.device)
+                        if isinstance(inputs, list):
+                            inputs = [inp.to(model.device) for inp in inputs]
+                        else:
+                            inputs = inputs.to(model.device)
+                        labels = labels.to(model.device)
                         for i, model_copy in enumerate(models):
                             correct_batch, total_batch, loss = model_eval(model_copy, inputs, labels, dataset.get_loss())
                             correct[i] += correct_batch
@@ -329,6 +407,12 @@ def train(model: ContinualModel, dataset: ContinualDataset,
         results.append(accs[0])
         results_mask_classes.append(accs[1])
 
+        if hasattr(model, 'saliency_net') and len(accs)>2:
+            sal_metrics = accs[-1]
+            accs = accs[:-1]
+        else:
+            sal_metrics = [0., 0., 0.]
+
         mean_acc = np.mean(accs, axis=1)
         print_mean_accuracy(mean_acc, t + 1, dataset.SETTING)
 
@@ -374,9 +458,13 @@ def get_next_pos_classes(model: ContinualModel, forward_dataset: ContinualDatase
     #Compute outputs next task
     for data in forward_train_loader:
         inputs, labels, _ = data
-        inputs, labels = inputs.to(model.device), labels.to(model.device)
+        if isinstance(inputs, list):
+            inputs = [inp.to(model.device) for inp in inputs]
+        else:
+            inputs = inputs.to(model.device)  
+        labels = labels.to(model.device)
         with torch.no_grad():
-            outputs = model(inputs)
+            outputs = model(inputs)[1]
         _, pred = torch.max(outputs.data, 1)
         
         list_pred.append(pred.cpu())

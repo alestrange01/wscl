@@ -46,11 +46,25 @@ class Buffer_dataset(Dataset):
 
 
 def model_eval(model, inputs, labels, criterion):
-    outputs = model(inputs)
-    _, pred = torch.max(outputs.data, 1)
-    correct = torch.sum(pred == labels).item()
-    total = labels.shape[0]
+    status = model.net.training
+    model.net.eval()
+    has_saliency = hasattr(model, 'saliency_net')
+    if has_saliency:
+        sal_status = model.saliency_net.training
+        model.saliency_net.eval()
 
-    loss = criterion(outputs, labels)
+    with torch.no_grad():
+        outputs = model(inputs)
+        if isinstance(outputs, tuple):
+            outputs = outputs[1]
+        _, pred = torch.max(outputs.data, 1)
+        correct = torch.sum(pred == labels).item()
+        total = labels.shape[0]
+
+        loss = criterion(outputs, labels)
+
+    model.net.train(status)
+    if has_saliency:
+        model.saliency_net.train(sal_status)
 
     return correct, total, loss.item()
