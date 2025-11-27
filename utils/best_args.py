@@ -237,8 +237,8 @@ best_args = {
                                     1000: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 1}
                               },
                     'er_ace_ser': {
-                                    200: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 1},
-                                    1000: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 1}
+                                    200: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 10},
+                                    1000: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0, 'val_dataset_size': 1000, 'freezing_buff_size': 200, 'batch_size': 8, 'minibatch_size': 8, 'n_epochs': 10}
                               }},
     'seq-cifar100': {
         'sgd': {-1: {'lr': 0.03, 'optim_mom': 0, 'optim_wd': 0}},

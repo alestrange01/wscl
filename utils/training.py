@@ -23,6 +23,7 @@ import statistics
 from torch.utils.data import DataLoader
 from utils.freezing_eval import Buffer_dataset
 from utils.freezing_eval import model_eval
+import pickle
 from copy import deepcopy
 from utils.buffer import Buffer
 
@@ -77,11 +78,8 @@ def evaluate(model: ContinualModel, dataset: ContinualDataset, last=False) -> Tu
             continue
         correct, correct_mask_classes, total = 0.0, 0.0, 0.0
         assert set(test_loader.dataset.targets) == set(dataset.get_task_labels(k)), "Something wrong in test dataset creation."
-        current_task_labels = []
-        if 'dream-' in dataset.NAME:
-            current_task_labels = dataset.get_current_labels()
-        print(f"Evaluating task {k} with labels {current_task_labels}")
-        print(f"Test samples: {len(test_loader.dataset)}")
+        print(f"Evaluating task {k} with labels {set(dataset.get_task_labels(k))}")
+        # print(f"Test samples: {len(test_loader.dataset)}")
         for data in test_loader:
             with torch.no_grad():
                 inputs, labels, _ = data
@@ -148,7 +146,7 @@ def train(model: ContinualModel, dataset: ContinualDataset,
     
     if not args.nowand:
         assert wandb is not None, "Wandb not installed, please install it or run without wandb"
-        wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=vars(args))
+        wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=vars(args), name=f"{args.model}_{args.dataset}_run{args.run_idx}")
         args.wandb_url = wandb.run.get_url()
 
     model.net.to(model.device)
@@ -171,7 +169,14 @@ def train(model: ContinualModel, dataset: ContinualDataset,
             else:
                 _, _ = dataset_copy.get_data_loaders()
         if model.NAME != 'icarl' and model.NAME != 'pnn':
-            random_results_class, random_results_task = evaluate(model, dataset_copy)
+            random_results = evaluate(model, dataset_copy)
+            random_results_class = random_results[0]
+            random_results_task = random_results[1]
+            if hasattr(model, 'saliency_net'):
+                random_sal_metrics = random_results[2]
+            else:
+                random_sal_metrics = [0., 0., 0.]
+
 
     buffers_list = []
 
@@ -421,12 +426,38 @@ def train(model: ContinualModel, dataset: ContinualDataset,
             logger.log_fullacc(accs)
 
         if not args.nowand:
-            d2={'RESULT_class_mean_accs': mean_acc[0], 'RESULT_task_mean_accs': mean_acc[1], 'STEP': t, 'num_freezed_layers': freezed_layers,
+            d2={'RESULT_class_mean_accs': mean_acc[0], 'RESULT_task_mean_accs': mean_acc[1],
+                'kld':sal_metrics[0], 'cc':sal_metrics[1], 'sim':sal_metrics[2],
                 **{f'RESULT_class_acc_{i}': a for i, a in enumerate(accs[0])},
-                **{f'RESULT_task_acc_{i}': a for i, a in enumerate(accs[1])},
-                }
+                **{f'RESULT_task_acc_{i}': a for i, a in enumerate(accs[1])}}
+            if hasattr(model, 'saliency_net'):
+                if hasattr(model, 'saliency_scheduler') and model.saliency_scheduler is not None:
+                    lr = model.saliency_opt.param_groups[0]['lr']
+                    d2.update({'sal_lr':lr})
 
             wandb.log(d2)
+
+        if args.savecheck:
+            results_path = f"/mnt/storage_6TB/astrano/dottorato/wscl-ser/results/{args.ckpt_name}"
+            print(f"Saving checkpoint into: {results_path}")
+            create_if_not_exists(results_path)
+            # model
+            torch.save(model.net.state_dict(), f'{results_path}/{args.ckpt_name}_{t}.pt')
+            # saliency_net (if exists)
+            if hasattr(model, 'saliency_net'):
+                torch.save(model.saliency_net.state_dict(), f'{results_path}/{args.ckpt_name}_sal_model_{t}.pt')
+            if 'buffer_size' in model.args:
+                with open(f'{results_path}/{args.ckpt_name_replace.format("bufferoni")}_{t}.pkl', 'wb') as f:
+                    pickle.dump(obj=deepcopy(model.buffer).to('cpu'), file=f)
+            with open(f'{results_path}/{args.ckpt_name_replace.format("interpr")}_{t}.pkl', 'wb') as f:
+                pickle.dump(obj=args, file=f)
+            
+            with open(f'{results_path}/{args.ckpt_name_replace.format("results")}_{t}.pkl', 'wb') as f:
+                pickle.dump(obj=[
+                    results, 
+                    results_mask_classes, 
+                    sal_metrics,
+                    logger.dump()], file=f)
 
 
     if not args.disable_log and not args.ignore_other_metrics:
@@ -434,7 +465,7 @@ def train(model: ContinualModel, dataset: ContinualDataset,
         logger.add_forgetting(results, results_mask_classes)
         if model.NAME != 'icarl' and model.NAME != 'pnn':
             logger.add_fwt(results, random_results_class,
-                    results_mask_classes, random_results_task)
+                    results_mask_classes, random_results_task, random_sal_metrics)
 
     if not args.disable_log:
         logger.write(vars(args))
