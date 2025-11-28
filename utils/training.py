@@ -465,7 +465,7 @@ def train(model: ContinualModel, dataset: ContinualDataset,
         logger.add_forgetting(results, results_mask_classes)
         if model.NAME != 'icarl' and model.NAME != 'pnn':
             logger.add_fwt(results, random_results_class,
-                    results_mask_classes, random_results_task, random_sal_metrics)
+                    results_mask_classes, random_results_task)
 
     if not args.disable_log:
         logger.write(vars(args))
